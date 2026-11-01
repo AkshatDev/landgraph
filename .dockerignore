@@ -1,0 +1,25 @@
+# Python-generated files
+**/__pycache__
+**/*.py[oc]
+**/build/
+**/dist/
+**/wheels/
+**/*.egg-info
+# git related files
+.git
+# Virtual environments
+.venv
+# secrets
+.env
+# AI files and other jargon
+CLAUDE.md
+*.pdf
+*:Zone.Identifier
+.claude/
+.claude/settings.local.json
+.vscode
+.idea
+.pytest_cache/
+PROJECT_IDEA.md
+PROGRESS.md
+candidate.md
