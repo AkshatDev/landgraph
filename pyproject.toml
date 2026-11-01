@@ -1,0 +1,20 @@
+[project]
+name = "landgraph"
+version = "0.1.0"
+description = "Data pipelines that bring public UK land and planning data into **PostgreSQL/PostGIS**, and a small **FastAPI** service that answers the question - what do we know about this piece of land?"
+readme = "README.md"
+authors = [
+    { name = "AkshatDev", email = "akshat.thakur8@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "psycopg[binary]>=3.3.6",
+    "sqlalchemy>=2.1.6",
+]
+
+[project.scripts]
+landgraph = "landgraph:main"
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
