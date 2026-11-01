@@ -8,13 +8,19 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "asgi-correlation-id>=5.0.1",
     "psycopg[binary]>=3.3.6",
+    "python-json-logger>=4.2.0",
     "sqlalchemy>=2.1.6",
 ]
-
-[project.scripts]
-landgraph = "landgraph:main"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.3",
+    "sphinx>=9.2.0",
+    "sphinx-immaterial>=0.13.9",
+]
