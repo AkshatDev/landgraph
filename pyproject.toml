@@ -45,3 +45,6 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
+
+[tool.uv]
+default-groups = ["dev", "notebook"]
