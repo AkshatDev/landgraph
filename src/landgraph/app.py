@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Literal
 
+from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, Request, Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -78,6 +79,7 @@ def create_app(database_url: str) -> FastAPI:
         response.status_code = 503
         return Ready(status="unavailable", checks=checks)
 
+    app.add_middleware(CorrelationIdMiddleware)
     return app
 
 
