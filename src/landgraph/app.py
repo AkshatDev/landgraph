@@ -1,14 +1,19 @@
 """The main entry point for the application to start a FastAPI application."""
 
 import logging
+import os
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, Request, Response
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
+from .db import Database
 from .log_config import configure_logging
-from .schemas import Health
+from .schemas import Health, Ready
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +30,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     yield
 
 
-def create_app() -> FastAPI:
+def create_app(database_url: str) -> FastAPI:
     """Create a FastAPI application."""
     app = FastAPI(lifespan=lifespan)
+    app.state.db = Database(database_url)
 
     @app.middleware("http")
     async def log_request(
@@ -56,7 +62,23 @@ def create_app() -> FastAPI:
         """Report that the service is running."""
         return Health(status="ok")
 
+    @app.get("/ready")
+    def ready(request: Request, response: Response) -> Ready:
+        """Report whether all services are ready or not."""
+        checks: dict[str, Literal["ok", "unavailable"]] = {}
+        try:
+            with request.app.state.db.engine.connect() as conn:
+                conn.execute(text("SELECT PostGIS_Version()"))
+                checks["database"] = "ok"
+        except SQLAlchemyError:
+            logger.exception("database not ready")
+            checks["database"] = "unavailable"
+        if all(value == "ok" for value in checks.values()):
+            return Ready(status="ready", checks=checks)
+        response.status_code = 503
+        return Ready(status="unavailable", checks=checks)
+
     return app
 
 
-app = create_app()
+app = create_app(os.environ["DATABASE_URL"])
