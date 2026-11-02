@@ -12,7 +12,7 @@ class Database:
 
     def __init__(self, url: str) -> None:
         """Initialize the class with a DB URL."""
-        self.engine: Engine = create_engine(url)
+        self.engine: Engine = create_engine(url, pool_pre_ping=True)
         """Database engine from sqlalchemy using create_engine method.
 
         create_engine is a lazy method. No connection is made to the actual DB.

@@ -7,9 +7,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from landgraph import create_app
+from landgraph.app import create_app
 
 APP_LOGGER = "landgraph.app"
+FAKE_URL = "postgresql+psycopg://user:pass@localhost:5432/fake"
 
 
 def app_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -46,7 +47,7 @@ def test_request_log_is_printed_as_json(capsys: pytest.CaptureFixture[str]) -> N
     # Start the app inside this test, not via the shared ``client`` fixture: the
     # log handler keeps the stdout that existed when logging was configured, so
     # the app must start while ``capsys`` is active for it to see the output.
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(FAKE_URL)) as client:
         client.get("/health")
 
     lines = app_json_lines(capsys)

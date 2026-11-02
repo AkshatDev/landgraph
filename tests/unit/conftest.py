@@ -6,7 +6,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from landgraph import create_app
+from landgraph.app import create_app
+
+FAKE_URL = "postgresql+psycopg://user:pass@localhost:5432/fake"
 
 
 @pytest.fixture(scope="module")
@@ -16,7 +18,7 @@ def app() -> FastAPI:
     Returns:
         A new application instance.
     """
-    return create_app()
+    return create_app(FAKE_URL)
 
 
 @pytest.fixture(scope="module")
