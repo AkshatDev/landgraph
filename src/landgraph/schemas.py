@@ -17,10 +17,13 @@ class Health(BaseModel):
     """Always "ok" while the service is running."""
 
 
-class DBready(BaseModel):
-    """Response body of the is_db_ready check."""
+class Ready(BaseModel):
+    """Response body of the readiness check."""
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
     status: Literal["ready", "unavailable"]
-    """Always "ok" while the service is running."""
+    """"ready" if every check is "ok", otherwise "unavailable" (sent with HTTP 503)."""
+
+    checks: dict[str, Literal["ok", "unavailable"]]
+    """Result of each dependency check, e.g. {"database": "ok"}."""
