@@ -23,12 +23,16 @@ def configure_logging() -> None:
                 "class": "logging.StreamHandler",
                 "stream": "ext://sys.stdout",
                 "formatter": "json",
+                "filters": ["correlation_id"],
             }
         },
         "root": {"handlers": ["stdout"], "level": os.environ.get("LOG_LEVEL", "INFO")},
         "loggers": {
             "uvicorn": {"handlers": [], "propagate": True},
             "uvicorn.access": {"handlers": [], "propagate": False},
+        },
+        "filters": {
+            "correlation_id": {"()": "asgi_correlation_id.CorrelationIdFilter"}
         },
     }
 
