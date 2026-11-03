@@ -3,3 +3,7 @@ tests/
 docs/
 raw/
 .env*
+.venv/
+__pycache__/
+.git/
+staged/

@@ -9,7 +9,8 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from .coverage import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
 from .queries import find_parcels
@@ -40,7 +41,14 @@ def site_snapshot(
     try:
         with request.app.state.db.engine.connect() as conn:
             parcels = find_parcels(conn, lat=lat, lng=lng)
-    except SQLAlchemyError:
-        logger.warning("site snapshot failed: database unavailable", exc_info=True)
+    # Only temporary failures become 503 (a retry may succeed): can't connect,
+    # statement timeout, or no free pooled connection. Anything else (missing
+    # table, bad SQL) is a bug or misconfiguration: let it raise -> 500 + ERROR log.
+    except (OperationalError, PoolTimeoutError) as exc:
+        logger.warning(
+            "database unavailable",
+            extra={"error": type(exc).__name__},
+            exc_info=True,
+        )
         raise HTTPException(status_code=503, detail="database unavailable") from None
     return SiteSnapshot(lat=lat, lng=lng, parcels=parcels)
