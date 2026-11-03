@@ -1,27 +1,26 @@
 """Transform data in local landing zone."""
 
-from pathlib import Path
-
 import polars as pl
+
+TITLE_BOUNDARY_COLUMNS = [
+    "reference",
+    "entity",
+    "geometry",
+    "point",
+    "start-date",
+    "end-date",
+    "entry-date",
+]
 
 # Swindon (planning.data entity 8600027) bounding box, widened by 0.02° (~1–2 km)
 LON_MIN, LON_MAX = -1.8651 - 0.02, -1.6028 + 0.02
 LAT_MIN, LAT_MAX = 51.4825 - 0.02, 51.6927 + 0.02
 
 
-def swindon_title_boundaries(path: Path) -> pl.LazyFrame:
-    """Plan: read the national file, keep rows in Swindon's box, clean the columns."""
-    ld = (
-        pl.scan_parquet(path)
-        .select(
-            "reference",
-            "entity",
-            "geometry",
-            "point",
-            "start-date",
-            "end-date",
-            "entry-date",
-        )
+def transform_title_boundaries(lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Keep rows in Swindon's box, drop empty geometry/reference, parse dates, snake_case names."""
+    return (
+        lf.select(TITLE_BOUNDARY_COLUMNS)
         .with_columns(
             lon=pl.col("point").str.extract(r"POINT \((\S+) ", 1).cast(pl.Float64),
             lat=pl.col("point").str.extract(r" (\S+)\)", 1).cast(pl.Float64),
@@ -45,5 +44,3 @@ def swindon_title_boundaries(path: Path) -> pl.LazyFrame:
         )
         .drop("point", "lon", "lat")
     )
-
-    return ld
