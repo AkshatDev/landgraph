@@ -1,4 +1,9 @@
-"""Extraction module for ETL process for this project."""
+"""Paged API client for planning.data.gov.uk (alternative source; not used by the CLI).
+
+Built first, then replaced by the bulk download after measuring: ~22 s per 100 rows
+and disconnects at limit=500, against 41 s for the whole national file. Kept for small
+incremental updates (filter by entry_date) and as the retry/backoff reference.
+"""
 
 import logging
 import time
