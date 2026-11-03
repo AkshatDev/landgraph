@@ -12,11 +12,14 @@ from fastapi import FastAPI, Request, Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from . import api_v1
 from .db import Database
 from .log_config import configure_logging
 from .schemas import Health, Ready
 
 logger = logging.getLogger(__name__)
+
+API_STATEMENT_TIMEOUT_MS = 2000
 
 
 @asynccontextmanager
@@ -34,7 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 def create_app(database_url: str) -> FastAPI:
     """Create a FastAPI application."""
     app = FastAPI(lifespan=lifespan)
-    app.state.db = Database(database_url)
+    # API requests should never wait long: Postgres cancels any query over 2 s.
+    app.state.db = Database(database_url, statement_timeout_ms=API_STATEMENT_TIMEOUT_MS)
 
     @app.middleware("http")
     async def log_request(
@@ -78,6 +82,10 @@ def create_app(database_url: str) -> FastAPI:
             return Ready(status="ready", checks=checks)
         response.status_code = 503
         return Ready(status="unavailable", checks=checks)
+
+    # Public API, versioned. /health and /ready stay unversioned: they serve
+    # infrastructure (load balancers, uptime checks), not API clients.
+    app.include_router(api_v1.router)
 
     app.add_middleware(CorrelationIdMiddleware)
     return app
