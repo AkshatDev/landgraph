@@ -2,6 +2,8 @@
 
 import polars as pl
 
+from landgraph.coverage import LAT_MAX, LAT_MIN, LON_MAX, LON_MIN
+
 TITLE_BOUNDARY_COLUMNS = [
     "reference",
     "entity",
@@ -11,10 +13,6 @@ TITLE_BOUNDARY_COLUMNS = [
     "end-date",
     "entry-date",
 ]
-
-# Swindon (planning.data entity 8600027) bounding box, widened by 0.02° (~1–2 km)
-LON_MIN, LON_MAX = -1.8651 - 0.02, -1.6028 + 0.02
-LAT_MIN, LAT_MAX = 51.4825 - 0.02, 51.6927 + 0.02
 
 
 def transform_title_boundaries(lf: pl.LazyFrame) -> pl.LazyFrame:
