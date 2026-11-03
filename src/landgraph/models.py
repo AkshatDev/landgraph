@@ -38,3 +38,33 @@ class TitleBoundary(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     """When our pipeline last wrote this row."""
+
+
+class PipelineCheckpoint(Base):
+    """How far ``load`` has got through one source file, for resuming after a crash.
+
+    One row per (dataset, source file). It is written in the same transaction as
+    the data, so it never claims rows that are not in the database.
+    """
+
+    __tablename__ = "pipeline_checkpoints"
+
+    dataset: Mapped[str] = mapped_column(primary_key=True)
+    """planning.data.gov.uk dataset name, e.g. ``title-boundary``."""
+
+    source_fingerprint: Mapped[str] = mapped_column(primary_key=True)
+    """Identifies the exact source file: ``<name>:<size in bytes>:<row count>``.
+
+    A new download gets a new fingerprint, so its load starts from the beginning.
+    """
+
+    row_group: Mapped[int]
+    """Next parquet row group to read. Equal to the file's row-group count when done."""
+
+    row_offset: Mapped[int]
+    """Rows of ``row_group`` already committed; reading resumes after them."""
+
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    """When the checkpoint last moved. Set to ``now()`` in the upsert too."""
