@@ -1,11 +1,12 @@
-"""Run the pipeline: ``python -m landgraph.pipeline``.
+"""Run the pipeline: ``python -m landgraph.pipeline <command>``.
 
-For now it only extracts: it fetches a few pages and logs what it got.
-Transform, load and checkpoints will be added here.
+download <dataset>          file host → raw/ (no DB)
+load <dataset> <raw file>   raw/ → transform → PostGIS, resumable via checkpoints
 """
 
 import argparse
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -13,8 +14,12 @@ from pathlib import Path
 import httpx
 from asgi_correlation_id import correlation_id
 
+from landgraph import Database
 from landgraph.log_config import configure_logging
 
+from .load import load_title_boundaries_resumable
+from .resources import CheckResources
+from .transform import TITLE_BOUNDARY_COLUMNS
 from .website_client import WebClient
 
 BASE_URL = "https://www.planning.data.gov.uk"
@@ -39,28 +44,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Fetch pages of a dataset and log each one."""
-    # parser = argparse.ArgumentParser(prog="python -m landgraph.pipeline")
-    # parser.add_argument("dataset", nargs="?", default="title-boundary")
-    # parser.add_argument("--limit", type=int, default=50, help="entities per page")
-    # parser.add_argument("--start-offset", type=int, default=0)
-    # parser.add_argument("--max-pages", type=int, default=3, help="stop early (demo)")
-    # args = parser.parse_args()
-
-    # logger.info("pipeline started", extra=vars(args))
-
-    # with httpx.Client(base_url=BASE_URL, timeout=60.0) as client:
-    #     extract = Extract(client)
-    #     pages = extract.iter_pages(
-    #         args.dataset, limit=args.limit, start_offset=args.start_offset
-    #     )
-    #     for page_number, (offset, entities) in enumerate(pages, start=1):
-    #         logger.info(
-    #             "page received",
-    #             extra={"page": page_number, "offset": offset, "rows": len(entities)},
-    #         )
-    #         if page_number == args.max_pages:
-    #             break
+    """Orchestrator for ETL pipeline."""
     args = parse_args()
     logger.info(
         "pipeline started", extra={"command": args.command, "dataset": args.dataset}
@@ -74,13 +58,24 @@ def main() -> None:
         logger.info("pipeline finished", extra={"path": str(path)})
 
     elif args.command == "load":
-        raise NotImplementedError("load is not built yet")
-
-    logger.info("runner finished")
+        if args.dataset != "title-boundary":
+            raise ValueError(
+                f"load supports only title-boundary for now, got {args.dataset}"
+            )
+        resources = CheckResources()
+        resources.check_memory()
+        resources.apply_thread_limits()
+        batch_rows = resources.batch_rows_for(args.path, TITLE_BOUNDARY_COLUMNS)
+        db = Database(os.environ["DATABASE_URL"])
+        db.create_tables()
+        rows = load_title_boundaries_resumable(
+            db, args.path, read_batch_rows=batch_rows
+        )
+        logger.info("pipeline finished", extra={"rows": rows})
 
 
 def run() -> None:
-    """Start the runner for ETL pipleline, pick whatever stage you want."""
+    """Start the runner for ETL pipeline, pick whatever stage you want."""
     correlation_id.set(uuid.uuid4().hex)
     configure_logging()
     try:
