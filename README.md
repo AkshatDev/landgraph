@@ -1,28 +1,31 @@
 # landgraph
 
-A data pipeline that loads public UK land data into **PostgreSQL/PostGIS**, and a small **FastAPI** service that answers *"what land parcel is at this point?"*
+A data pipeline that loads public UK land data into **PostgreSQL/PostGIS**, and a small **FastAPI** service that answers *"what land parcel is at this point, and what planning constraints affect it?"*
 
 Scoped to one local authority, the **Borough of Swindon** (ONS `E06000030`, planning.data entity `8600027`), so the whole flow can be built, measured and explained end to end.
 
 **Live API:** https://landgraph.fastapicloud.dev/docs
 
 ```bash
-curl "https://landgraph.fastapicloud.dev/v1/site-snapshot?lat=51.561146&lng=-1.848042"
+curl "https://landgraph.fastapicloud.dev/v1/site-snapshot?lat=51.552766&lng=-1.788171"
 ```
 ```json
 {
-  "lat": 51.561146,
-  "lng": -1.848042,
+  "lat": 51.552766,
+  "lng": -1.788171,
   "parcels": [
     {
-      "reference": "24397490",
-      "area_m2": 11586.0,
-      "geometry": {"type": "MultiPolygon", "coordinates": [[[[-1.847945988, 51.560794995], "..."]]]}
+      "reference": "24912362",
+      "area_m2": 590.0,
+      "geometry": {"type": "MultiPolygon", "coordinates": [[[[-1.78..., 51.55...], "..."]]]},
+      "constraints": [
+        {"dataset": "conservation-area", "entity": 44000790, "name": "Swindon Town Gardens"}
+      ]
     }
   ]
 }
 ```
-That point is Lydiard House: one title of 1.2 hectares. Try `lat=51.5558&lng=-1.7797` for a 125 m² house plot.
+A 590 m² plot inside the Swindon Town Gardens conservation area. Also try Lydiard House (`lat=51.561146&lng=-1.848042`: one 1.2-hectare title, no conservation area) or `lat=51.5558&lng=-1.7797` (a 125 m² house plot).
 
 ## Architecture
 
@@ -30,8 +33,9 @@ That point is Lydiard House: one title of 1.2 hectares. Try `lat=51.5558&lng=-1.
  files.planning.data.gov.uk          raw/ (landing zone)                    PostGIS (local or Neon)            FastAPI Cloud
 ┌────────────────────────┐  download ┌───────────────────────────┐  load   ┌───────────────────────────┐  query ┌──────────────────────┐
 │ title-boundary.parquet │ ────────▶ │ raw/<dataset>/<date>/file │ ──────▶ │ title_boundaries (27700)  │ ◀───── │ GET /v1/site-snapshot│
-│ 3.9 GB, 22.8M parcels  │  httpx    │ national, untouched       │ pyarrow │ pipeline_checkpoints      │  GiST  │ lat/lng → parcels    │
-└────────────────────────┘  stream   └───────────────────────────┘ +Polars └───────────────────────────┘        └──────────────────────┘
+│ conservation-area      │  httpx    │ national, untouched       │ pyarrow │ constraints      (27700)  │  GiST  │ lat/lng → parcels    │
+│ 3.9 GB + 24 MB         │  stream   │                           │ +Polars │ pipeline_checkpoints      │        │   + constraints      │
+└────────────────────────┘           └───────────────────────────┘         └───────────────────────────┘        └──────────────────────┘
 ```
 
 Each step touches only one outside system, so it can be re-run on its own, and the same raw file loads into local Postgres or Neon by changing `DATABASE_URL`.
@@ -69,7 +73,11 @@ Index Scan using idx_title_boundaries_geom on title_boundaries
   Rows Removed by Filter: 2        Execution Time: 1.733 ms
 ```
 
+**Constraints: one table, one spatial join.** All constraint layers share a `constraints` table keyed on planning.data `entity` (council references like `CA10` repeat across 41 councils), with a `dataset` column and a generic `GEOMETRY` column (areas are polygons, listed buildings would be points). Each parcel in the snapshot lists the constraints whose shape **overlaps the parcel** (`ST_Intersects(constraint.geom, parcel.geom)`), not just the clicked point: a conservation area covering a corner of a field still affects the site. The 54 conservation areas around Swindon overlap **8,178** parcels. Both datasets use the same resumable loop and keep separate checkpoints. Selection is by centroid, which is right for small shapes; very large ones (long flood zones) would need a real overlap test in PostGIS.
+
 **`parcels` is a list.** INSPIRE outlines are indicative and overlap: in 5,000 random Swindon points, 93.2% hit one parcel, **0.6% hit 2–3**, 6.2% hit none (roads, rivers, unregistered land). The API returns every match and leaves ranking to the client.
+
+**Messy source data.** One conservation area is published as `Swindonâ€™s Railway`: a curly apostrophe encoded as UTF-8, read as Windows-1252 and saved again (mojibake). It is stored as published; repairing text like this belongs in the transform (`ftfy`) with a data-quality check.
 
 **Input validation from one source of truth.** `coverage.py` holds the Swindon box used by both the pipeline filter and the API's `Query(ge=…, le=…)` bounds, so points outside the loaded data get a **422** instead of a misleading empty answer.
 
@@ -81,11 +89,11 @@ Index Scan using idx_title_boundaries_geom on title_boundaries
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /v1/site-snapshot?lat=&lng=` | parcels at a point in Swindon. 200 (list, may be empty), 422 (invalid or outside coverage), 503 (database unavailable) |
+| `GET /v1/site-snapshot?lat=&lng=` | parcels at a point in Swindon, each with the constraints overlapping it. 200 (list, may be empty), 422 (invalid or outside coverage), 503 (database unavailable) |
 | `GET /health` | the process is up |
 | `GET /ready` | the database is reachable (used by the platform) |
 
-Versioned under `/v1`: additive changes stay in v1, breaking changes get `/v2`. Health checks are unversioned because they serve infrastructure, not clients.
+Versioned under `/v1`: additive changes stay in v1 (adding `constraints` was one), breaking changes get `/v2`. Health checks are unversioned because they serve infrastructure, not clients.
 
 ## Running it
 
@@ -96,8 +104,11 @@ cp .env.example .env                       # set POSTGRES_USER / POSTGRES_PASSWO
 docker compose up -d db
 
 uv run python -m landgraph.pipeline download title-boundary
+uv run python -m landgraph.pipeline download conservation-area
 docker compose run --rm app python -m landgraph.pipeline \
   load title-boundary raw/title-boundary/<date>/title-boundary.parquet
+docker compose run --rm app python -m landgraph.pipeline \
+  load conservation-area raw/conservation-area/<date>/conservation-area.parquet
 
 docker compose run --rm -p 8000:8000 app fastapi dev --host 0.0.0.0   # http://localhost:8000/docs
 ```
@@ -108,14 +119,14 @@ docker compose run --rm -p 8000:8000 app fastapi dev --host 0.0.0.0   # http://l
 src/landgraph/
   app.py              FastAPI app: middleware, /health, /ready
   api_v1.py           /v1 router: site-snapshot
-  queries.py          spatial queries (SQLAlchemy Core + PostGIS functions)
+  queries.py          spatial queries: parcels at a point, constraints per parcel
   coverage.py         Swindon bounding box, shared by pipeline and API
   models.py, db.py    tables (GeoAlchemy2) and engine with bounded timeouts
   pipeline/
     __main__.py       CLI: download | load
     website_client.py download with format check and progress logs
-    load.py           row-group loop, upsert, checkpoint per batch
-    transform.py      Polars: Swindon box, clean columns
+    load.py           per-table loaders sharing one row-group loop; upsert + checkpoint
+    transform.py      Polars: Swindon box, clean columns (titles, constraints)
     checkpoint.py     load/save checkpoint (same transaction as data)
     resources.py      memory check, pyarrow threads, batch size
     extract.py        paged API client (alternative source)
@@ -127,15 +138,18 @@ notebooks/            data exploration and memory measurements
 | Dataset | Source | Rows loaded | Licence |
 |---|---|---|---|
 | Title boundaries (HM Land Registry INSPIRE polygons) | [planning.data.gov.uk](https://www.planning.data.gov.uk) bulk parquet | 115,644 (Swindon box) | HMLR INSPIRE terms |
+| Conservation areas | planning.data.gov.uk bulk parquet | 54 (Swindon box) | OGL |
 | Local authority boundary (for the Swindon box) | planning.data.gov.uk `local-authority-district` | 1 | OGL |
 
 Public government data only. INSPIRE polygons show where a title is, not who owns it.
 
 ## Next steps
 
-- **Constraints** (conservation areas, listed buildings, flood zones) in one `constraints` table keyed on planning.data `entity` (council references like `CA10` repeat across 41 councils), joined to parcels with `ST_Intersects` in the snapshot
+- **More constraint layers**: listed buildings, scheduled monuments, SSSIs (one word in `CONSTRAINT_DATASETS`); flood zones with a real overlap filter instead of centroids
+- **A dataset spec** (columns, transform, upsert per dataset) so adding a table is configuration, not a new loader function
 - **Exact Swindon cut** with `ST_Intersects` against the borough boundary
 - **Tests** for the endpoint (cases already exercised manually: 200, empty, 422, 503, 500)
+- **Migrations** (Alembic) run before each deploy, with read-only database credentials for the API
 - **Load protection**: concurrency limit (503 + `Retry-After`), circuit breaker, `Cache-Control`
 - **At scale**: scheduled runs (GitHub Actions cron or Airflow), raw files in S3 with SQS-triggered loads, OpenSearch for text search over parcels and constraints
 
