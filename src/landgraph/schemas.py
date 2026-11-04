@@ -29,6 +29,21 @@ class Ready(BaseModel):
     """Result of each dependency check, e.g. {"database": "ok"}."""
 
 
+class ConstraintRef(BaseModel):
+    """A planning constraint that overlaps a parcel (e.g. a conservation area)."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    dataset: str
+    """Which layer it comes from, e.g. "conservation-area"."""
+
+    entity: int
+    """planning.data.gov.uk entity number: planning.data.gov.uk/entity/<entity>."""
+
+    name: str | None
+    """Human-readable name, e.g. "Swindon Town Gardens"."""
+
+
 class Parcel(BaseModel):
     """One registered land parcel (HM Land Registry INSPIRE polygon) at the queried point."""
 
@@ -42,6 +57,9 @@ class Parcel(BaseModel):
 
     geometry: dict[str, Any]
     """Parcel outline as GeoJSON in WGS84 lon/lat (EPSG:4326), ready for a web map."""
+
+    constraints: list[ConstraintRef] = []
+    """Planning constraints whose area overlaps this parcel. Empty if none."""
 
 
 class SiteSnapshot(BaseModel):
