@@ -68,3 +68,47 @@ class PipelineCheckpoint(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     """When the checkpoint last moved. Set to ``now()`` in the upsert too."""
+
+
+class Constraint(Base):
+    """A planning constraint layer feature: conservation area, flood zone, listed building, etc.
+
+    One table for every constraint dataset; ``dataset`` says which layer a row belongs to.
+    Adding a new layer is a data load, not a schema change.
+    """
+
+    __tablename__ = "constraints"
+
+    # autoincrement=False: the ID comes from planning.data, never from a sequence.
+    entity: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    """planning.data.gov.uk entity number. Unique across all datasets, unlike
+    ``reference`` (council codes such as ``CA10`` repeat across 41 councils)."""
+
+    dataset: Mapped[str] = mapped_column(index=True)
+    """planning.data dataset name, e.g. ``conservation-area``."""
+
+    reference: Mapped[str | None]
+    """The publishing organisation's own code. Not unique on its own."""
+
+    name: Mapped[str | None]
+    """Human-readable name, e.g. ``Swindon Town Gardens``."""
+
+    geom: Mapped[str] = mapped_column(Geometry("GEOMETRY", srid=27700))
+    """Shape in British National Grid (metres). Generic GEOMETRY because layers
+    differ: polygons for areas and zones, points for listed buildings."""
+
+    start_date: Mapped[datetime.date | None]
+    """When the constraint started (e.g. designation date), if known."""
+
+    end_date: Mapped[datetime.date | None]
+    """When the constraint ended; empty while it is in force."""
+
+    entry_date: Mapped[datetime.date | None]
+    """When planning.data.gov.uk last updated this record."""
+
+    loaded_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    """When our pipeline last wrote this row."""
