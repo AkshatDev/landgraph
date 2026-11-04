@@ -33,11 +33,24 @@ def site_snapshot(
         Query(ge=LON_MIN, le=LON_MAX, description="Longitude (WGS84), within Swindon"),
     ],
 ) -> SiteSnapshot:
-    """Return the land parcels at a point in Swindon.
+    """Return the land parcels at a point in Swindon, with the constraints affecting each.
 
     Empty `parcels` means no registered title at that point (roads, rivers,
     unregistered land). Points outside Swindon are rejected with 422.
-    """
+    \f
+    Args:
+        request: The incoming request (gives access to the app's database).
+        lat: Latitude in WGS84, within the Swindon box (validated by FastAPI).
+        lng: Longitude in WGS84, within the Swindon box (validated by FastAPI).
+
+    Returns:
+        The queried point and every parcel containing it, each with its
+        overlapping constraints.
+
+    Raises:
+        HTTPException: 503 when the database is unreachable or too slow (a retry
+            may succeed). Other database errors are not caught and become a 500.
+    """  # noqa: D301 (\f hides the rest from /docs)
     try:
         with request.app.state.db.engine.connect() as conn:
             parcels = find_parcels(conn, lat=lat, lng=lng)

@@ -153,5 +153,12 @@ class CheckResources:
 
 
 def _mb(n_bytes: int) -> float:
-    """Convert bytes to megabytes, rounded for logs."""
+    """Convert bytes to megabytes, rounded for logs.
+
+    Args:
+        n_bytes: A size in bytes.
+
+    Returns:
+        The size in MB (1 MB = 1024 * 1024 bytes), rounded to one decimal place.
+    """
     return round(n_bytes / MB, 1)

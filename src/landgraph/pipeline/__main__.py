@@ -29,7 +29,12 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse the command line."""
+    """Parse the command line into a command and its arguments.
+
+    Returns:
+        The parsed arguments: ``command`` (``download`` or ``load``), ``dataset``,
+        and ``raw_dir`` (download) or ``path`` (load).
+    """
     parser = argparse.ArgumentParser(prog="python -m landgraph.pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -45,7 +50,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Orchestrator for ETL pipeline."""
+    """Run one pipeline command: ``download`` or ``load``.
+
+    ``download`` only touches the file host; ``load`` only touches the local file
+    and the database. For ``load`` it checks free memory, caps pyarrow threads,
+    sizes batches from the parquet footer, creates missing tables, then calls the
+    loader for the dataset's table.
+
+    Raises:
+        ValueError: If ``load`` is given a dataset it can't load yet.
+        KeyError: If ``DATABASE_URL`` is not set (``load`` only).
+        InsufficientMemoryError: If there isn't enough free memory to load safely.
+    """
     args = parse_args()
     logger.info(
         "pipeline started", extra={"command": args.command, "dataset": args.dataset}
@@ -88,7 +104,12 @@ def main() -> None:
 
 
 def run() -> None:
-    """Start the runner for ETL pipeline, pick whatever stage you want."""
+    """Entry point: set a run ID, configure logging, run the command, exit cleanly.
+
+    Every log line of this run carries the same correlation ID. Any unhandled
+    error is logged once, with its traceback, and the process exits with status 1
+    so schedulers and CI see the failure.
+    """
     correlation_id.set(uuid.uuid4().hex)
     configure_logging()
     try:

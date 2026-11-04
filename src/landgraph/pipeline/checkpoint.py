@@ -1,4 +1,9 @@
-"""Gets current checkpoint for data load into the DB."""
+"""Read and write load checkpoints in the ``pipeline_checkpoints`` table.
+
+A checkpoint is ``(row_group, row_offset)``: everything before that position in
+one source file is already in the database. Both functions take a connection
+so the caller controls the transaction.
+"""
 
 from sqlalchemy import Connection, func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -9,7 +14,17 @@ from landgraph.models import PipelineCheckpoint
 def load_checkpoint(
     conn: Connection, dataset: str, fingerprint: str
 ) -> tuple[int, int]:
-    """Get the last checkpoint FROM the DB for a source DB."""
+    """Return where to resume loading one source file.
+
+    Args:
+        conn: An open database connection.
+        dataset: Dataset name, e.g. ``"title-boundary"``.
+        fingerprint: Identifies the exact source file (see ``load._fingerprint``).
+
+    Returns:
+        ``(row_group, row_offset)`` to resume from, or ``(0, 0)`` if this file has
+        no checkpoint yet.
+    """
     stmt = select(PipelineCheckpoint.row_group, PipelineCheckpoint.row_offset).where(
         PipelineCheckpoint.dataset == dataset,
         PipelineCheckpoint.source_fingerprint == fingerprint,
@@ -29,7 +44,14 @@ def save_checkpoint(
 
     Takes a ``Connection`` (not a ``Database``) on purpose: the caller passes the
     same connection it used for the data upsert, so data and checkpoint commit
-    together or not at all.
+    together or not at all. An upsert: the first save inserts, later ones update.
+
+    Args:
+        conn: The connection holding the open transaction with the batch's data.
+        dataset: Dataset name, e.g. ``"title-boundary"``.
+        fingerprint: Identifies the exact source file.
+        row_group: Next row group to read (the file's row-group count when done).
+        row_offset: Rows of ``row_group`` already committed.
     """
     stmt = insert(PipelineCheckpoint).values(
         dataset=dataset,

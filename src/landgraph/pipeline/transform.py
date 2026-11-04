@@ -1,4 +1,9 @@
-"""Transform data in local landing zone."""
+"""Polars transforms: one pure function per dataset, LazyFrame in, LazyFrame out.
+
+Each keeps the rows whose centroid (``point``) lies inside the Swindon box from
+``landgraph.coverage``, drops rows without geometry or a key, parses dates and
+renames columns to match the table. No I/O and no database: easy to test.
+"""
 
 import polars as pl
 
@@ -16,7 +21,15 @@ TITLE_BOUNDARY_COLUMNS = [
 
 
 def transform_title_boundaries(lf: pl.LazyFrame) -> pl.LazyFrame:
-    """Keep rows in Swindon's box, drop empty geometry/reference, parse dates, snake_case names."""
+    """Keep rows in Swindon's box, drop empty geometry/reference, parse dates, snake_case names.
+
+    Args:
+        lf: Rows with at least ``TITLE_BOUNDARY_COLUMNS``.
+
+    Returns:
+        Columns ``reference``, ``entity``, ``geometry`` (WKT, WGS84), and
+        ``start_date``, ``end_date``, ``entry_date`` as dates (empty strings become null).
+    """
     return (
         lf.select(TITLE_BOUNDARY_COLUMNS)
         .with_columns(
@@ -70,6 +83,10 @@ def transform_constraints(lf: pl.LazyFrame) -> pl.LazyFrame:
 
     Args:
         lf: Rows with at least ``CONSTRAINT_COLUMNS``.
+
+    Returns:
+        Columns ``dataset``, ``entity``, ``reference``, ``name``, ``geometry`` (WKT,
+        WGS84), and ``start_date``, ``end_date``, ``entry_date`` as dates.
     """
     return (
         lf.select(CONSTRAINT_COLUMNS)

@@ -1,4 +1,11 @@
-"""Load transformed data into the DB."""
+"""Load Swindon's rows from a national parquet file into PostGIS, resumably.
+
+One public loader per table (``load_title_boundaries_resumable``,
+``load_constraints_resumable``). Both call one shared loop that reads one row
+group at a time, transforms each batch with Polars, upserts it, and saves a
+checkpoint in the same transaction, so an interrupted load resumes where it
+stopped and a finished one is a no-op.
+"""
 
 import logging
 from collections.abc import Callable
@@ -26,7 +33,16 @@ INSERT_SLICE_ROWS = 1_000  # rows sent to Postgres per executemany
 
 
 def _title_boundary_upsert() -> Insert:
-    """Upsert one title boundary, keyed on its INSPIRE ``reference``."""
+    """Build the upsert for one title boundary, keyed on its INSPIRE ``reference``.
+
+    The WKT geometry is declared as WGS84 (4326) and transformed to British
+    National Grid (27700) by PostGIS during the insert. On conflict, every column
+    is updated and ``loaded_at`` is set to now, so re-runs refresh rows in place.
+
+    Returns:
+        An ``INSERT ... ON CONFLICT DO UPDATE`` with bind parameters named after the
+        transformed columns (``reference``, ``entity``, ``geometry``, dates).
+    """
     stmt = insert(TitleBoundary).values(
         reference=bindparam("reference"),
         entity=bindparam("entity"),
@@ -51,7 +67,16 @@ def _title_boundary_upsert() -> Insert:
 
 
 def _constraint_upsert() -> Insert:
-    """Upsert one constraint feature, keyed on planning.data ``entity``."""
+    """Build the upsert for one constraint feature, keyed on planning.data ``entity``.
+
+    Same pattern as ``_title_boundary_upsert``: WKT in 4326, stored in 27700,
+    every column refreshed on conflict.
+
+    Returns:
+        An ``INSERT ... ON CONFLICT DO UPDATE`` with bind parameters named after the
+        transformed columns (``dataset``, ``entity``, ``reference``, ``name``,
+        ``geometry``, dates).
+    """
     stmt = insert(Constraint).values(
         entity=bindparam("entity"),
         dataset=bindparam("dataset"),
@@ -87,7 +112,19 @@ def _constraint_upsert() -> Insert:
 # because the transform takes a LazyFrame instead of a path.
 # --------------------------------------------------------------------------
 def load_title_boundaries(db: Database, path: Path, batch_size: int = 1000) -> int:
-    """Get transformed data from given path and load it."""
+    """OLD loader, kept for comparison: scan the whole file and upsert in batches.
+
+    Not used by the CLI. Scanning the whole national file at once peaked at
+    3.3-4.4 GB and crashed WSL, and it has no checkpoints.
+
+    Args:
+        db: Target database.
+        path: The national title-boundary parquet file.
+        batch_size: Rows per transaction.
+
+    Returns:
+        Number of rows upserted.
+    """
     stmt = _title_boundary_upsert()
     plan = transform_title_boundaries(pl.scan_parquet(path))
     total = 0
@@ -108,6 +145,11 @@ def load_title_boundaries_resumable(
     db: Database, path: Path, read_batch_rows: int = READ_BATCH_ROWS
 ) -> int:
     """Load Swindon's title boundaries from the national file, resuming if interrupted.
+
+    Args:
+        db: Target database.
+        path: The national ``title-boundary.parquet`` in ``raw/``.
+        read_batch_rows: Rows read from the file per batch.
 
     Returns:
         Number of rows upserted in this run (0 if the file was already fully loaded).
@@ -130,6 +172,12 @@ def load_constraints_resumable(
 
     All constraint layers share the ``constraints`` table; ``dataset`` is also the
     checkpoint key, so each layer resumes independently.
+
+    Args:
+        db: Target database.
+        path: The layer's national parquet file in ``raw/``.
+        dataset: Dataset name, e.g. ``"conservation-area"``; used as the checkpoint key.
+        read_batch_rows: Rows read from the file per batch.
 
     Returns:
         Number of rows upserted in this run (0 if the file was already fully loaded).
@@ -154,7 +202,24 @@ def _load_resumable(
     stmt: Insert,
     read_batch_rows: int,
 ) -> int:
-    """The shared loop: row groups one at a time, upsert + checkpoint per batch."""
+    """The shared loop: row groups one at a time, upsert + checkpoint per batch.
+
+    Reads the checkpoint, returns at once if the file is already fully loaded,
+    otherwise loads the remaining row groups. Only the first row group of a
+    resumed run can be partly done; later ones start from row 0.
+
+    Args:
+        db: Target database.
+        path: The national parquet file.
+        dataset: Dataset name; the checkpoint key.
+        columns: Parquet columns to read (others are never decoded).
+        transform: Turns one raw batch into rows ready for ``stmt``.
+        stmt: The upsert statement for the target table.
+        read_batch_rows: Rows read from the file per batch.
+
+    Returns:
+        Number of rows upserted in this run (0 if the file was already fully loaded).
+    """
     parquet = pq.ParquetFile(path, pre_buffer=False)
     fingerprint = _fingerprint(path, parquet)
 
@@ -233,6 +298,22 @@ def _load_row_group(
 ) -> int:
     """Load one row group batch by batch; each batch commits with its checkpoint.
 
+    Batches entirely before ``skip_rows`` are skipped; a batch containing that
+    position is sliced. After the last batch the checkpoint points at the next row
+    group, so a resume never re-reads a finished one.
+
+    Args:
+        db: Target database.
+        dataset: Dataset name; the checkpoint key.
+        columns: Parquet columns to read.
+        transform: Turns one raw batch into rows ready for ``stmt``.
+        stmt: The upsert statement for the target table.
+        parquet: The open parquet file.
+        fingerprint: Identifies the source file in the checkpoint.
+        row_group: Index of the row group to load (0-based).
+        skip_rows: Rows at the start of this row group already committed earlier.
+        read_batch_rows: Rows per batch.
+
     Returns:
         Number of rows upserted from this row group.
     """
@@ -297,5 +378,13 @@ def _fingerprint(path: Path, parquet: pq.ParquetFile) -> str:
     """Cheap ID for this exact file: name, size in bytes, row count.
 
     A re-downloaded file gets a new fingerprint, so its load starts from the top.
+    Hashing the contents would be stronger but would read the whole 3.9 GB file.
+
+    Args:
+        path: The source file.
+        parquet: The same file opened with pyarrow (for the row count).
+
+    Returns:
+        A string such as ``"title-boundary.parquet:4098650893:22809343"``.
     """
     return f"{path.name}:{path.stat().st_size}:{parquet.metadata.num_rows}"

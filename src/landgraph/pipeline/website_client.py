@@ -1,4 +1,8 @@
-"""A module for gathering info from data source website and other utility functions."""
+"""Download national dataset files from files.planning.data.gov.uk.
+
+Checks which formats exist with HEAD requests, picks the smallest, and streams
+it into the ``raw/`` landing zone with progress logs. Never touches the database.
+"""
 
 import logging
 import time
@@ -15,13 +19,32 @@ logger = logging.getLogger(__name__)
 
 
 class WebClient:
-    """Get information from the website regarding any dataset and other utils."""
+    """Client for the planning.data.gov.uk file host.
+
+    Args:
+        client: An ``httpx.Client`` with ``base_url`` set to the file host. Injected
+            so tests can pass one backed by ``httpx.MockTransport``.
+    """
 
     def __init__(self, client: httpx.Client) -> None:
         self.client = client
 
     def check_data_size_and_formats(self, dataset: str) -> dict[str, int]:
-        """Check if a given dataset exists and return formats with sizes."""
+        """Find which supported formats exist for ``dataset`` and how big each is.
+
+        Sends a HEAD request per format (parquet, csv), so nothing is downloaded. The
+        file host answers 403 (not 404) for files that don't exist; both are skipped.
+
+        Args:
+            dataset: planning.data.gov.uk dataset name, e.g. ``"title-boundary"``.
+
+        Returns:
+            ``{format: size in bytes}`` for every available format.
+
+        Raises:
+            NoSupportedFormatError: If none of the supported formats exists.
+            httpx.HTTPStatusError: On any other HTTP error.
+        """
         formats = ["parquet", "csv"]
         sizes = {}
         for fmt in formats:
@@ -43,10 +66,20 @@ class WebClient:
         """Download the smallest available format of ``dataset`` into ``raw_dir``.
 
         The file is saved as ``raw_dir/<dataset>/<YYYY-MM-DD>/<dataset>.<format>``.
-        If that file already exists, nothing is downloaded (safe to re-run).
+        If that file already exists, nothing is downloaded (safe to re-run). The data
+        is streamed in 1 MB chunks to a ``.part`` file and renamed only when complete,
+        so an interrupted download never leaves a file that looks finished.
+
+        Args:
+            dataset: planning.data.gov.uk dataset name, e.g. ``"title-boundary"``.
+            raw_dir: Root of the landing zone, usually ``raw``.
 
         Returns:
             Path of the downloaded (or already present) file.
+
+        Raises:
+            NoSupportedFormatError: If no supported format exists for ``dataset``.
+            httpx.HTTPError: If the download fails.
         """
         sizes = self.check_data_size_and_formats(dataset)
         fmt = min(sizes, key=sizes.__getitem__)
@@ -94,14 +127,29 @@ class WebClient:
 
 
 def _mb(n_bytes: int) -> float:
-    """Convert bytes to megabytes, rounded for logs."""
+    """Convert bytes to megabytes, rounded for logs.
+
+    Args:
+        n_bytes: A size in bytes.
+
+    Returns:
+        The size in MB (1 MB = 1024 * 1024 bytes), rounded to one decimal place.
+    """
     return round(n_bytes / 1024 / 1024, 1)
 
 
 def _log_progress(
     dataset: str, percent: int, done: int, total: int, start: float
 ) -> None:
-    """Log one progress line: percent, size so far, speed and time remaining."""
+    """Log one progress line: percent, size so far, speed and time remaining.
+
+    Args:
+        dataset: Dataset being downloaded.
+        percent: Whole percent done.
+        done: Bytes downloaded so far.
+        total: Total bytes expected (from ``Content-Length``).
+        start: ``time.perf_counter()`` value when the download started.
+    """
     elapsed = time.perf_counter() - start
     speed = done / elapsed if elapsed > 0 else 0.0  # bytes per second
     eta = (total - done) / speed if speed > 0 else None

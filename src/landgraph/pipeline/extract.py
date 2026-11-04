@@ -18,13 +18,27 @@ logger = logging.getLogger(__name__)
 
 
 class Extract:
-    """Extract data from a given source."""
+    """Paged reader for the planning.data.gov.uk entity API, limited to Swindon.
+
+    Args:
+        client: An ``httpx.Client`` with ``base_url`` set to the API host. Injected
+            so tests can pass one backed by ``httpx.MockTransport``.
+    """
 
     def __init__(self, client: httpx.Client) -> None:
         self.client = client
 
     def fetch_page(self, dataset: str, offset: int, limit: int) -> list[dict]:
-        """Fetch one page of ``dataset`` inside Swindon.
+        """Fetch one page of ``dataset`` inside Swindon, retrying temporary failures.
+
+        Network errors, 5xx and 429 are retried up to ``MAX_ATTEMPTS`` times with
+        exponential backoff (2, 4, 8, ... seconds). Other 4xx errors fail at once,
+        because retrying a bad request can't succeed.
+
+        Args:
+            dataset: planning.data.gov.uk dataset name, e.g. ``"title-boundary"``.
+            offset: Position of the first entity to return.
+            limit: Number of entities per page.
 
         Returns:
             The entities on that page; an empty list means there are no more pages.

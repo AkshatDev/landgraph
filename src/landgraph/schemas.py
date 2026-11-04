@@ -63,7 +63,7 @@ class Parcel(BaseModel):
 
 
 class SiteSnapshot(BaseModel):
-    """What we know about a location: the parcels that contain the point."""
+    """What we know about a location: the parcels at the point and their constraints."""
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 

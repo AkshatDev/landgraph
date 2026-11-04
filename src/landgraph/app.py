@@ -1,4 +1,10 @@
-"""The main entry point for the application to start a FastAPI application."""
+"""FastAPI application: wiring, middleware and health checks.
+
+``create_app`` builds the app (database, request logging, correlation IDs,
+routers). Public endpoints live in versioned routers such as ``api_v1``;
+``/health`` and ``/ready`` stay here, unversioned, because they serve the
+platform rather than API clients. ``app`` at the bottom is what the server runs.
+"""
 
 import logging
 import os
@@ -29,13 +35,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     Logging is configured here rather than in ``create_app()``:
     the server applies its own logging setup after importing the app,
     which would overwrite ours.
+
+    Args:
+        app: The application being started (unused; required by FastAPI).
+
+    Yields:
+        Control to FastAPI while the app is serving requests.
     """
     configure_logging()
     yield
 
 
 def create_app(database_url: str) -> FastAPI:
-    """Create a FastAPI application."""
+    """Create and configure the FastAPI application.
+
+    Builds the database engine (with a 2 s statement timeout for API queries),
+    adds request logging and correlation-ID middleware, and registers the health
+    checks and the ``/v1`` router. A factory rather than a global so tests can build
+    an app against any database.
+
+    Args:
+        database_url: SQLAlchemy URL of the PostGIS database to query.
+
+    Returns:
+        The configured application.
+    """
     app = FastAPI(lifespan=lifespan)
     # API requests should never wait long: Postgres cancels any query over 2 s.
     app.state.db = Database(database_url, statement_timeout_ms=API_STATEMENT_TIMEOUT_MS)
@@ -44,7 +68,15 @@ def create_app(database_url: str) -> FastAPI:
     async def log_request(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        """Log one line per request with method, path, status code and duration."""
+        """Log one line per request with method, path, status code and duration.
+
+        Args:
+            request: The incoming request.
+            call_next: Passes the request to the rest of the app and returns its response.
+
+        Returns:
+            The response from the rest of the app, unchanged.
+        """
         start = time.perf_counter()
         response = await call_next(request)
 
@@ -64,12 +96,29 @@ def create_app(database_url: str) -> FastAPI:
 
     @app.get("/health")
     async def health() -> Health:
-        """Report that the service is running."""
+        """Report that the process is up and serving requests (liveness).
+
+        Does not touch the database, so it stays green during a database outage.
+        \f
+        Returns:
+            Always ``{"status": "ok"}``.
+        """  # noqa: D301 (\f hides the rest from /docs)
         return Health(status="ok")
 
     @app.get("/ready")
     def ready(request: Request, response: Response) -> Ready:
-        """Report whether all services are ready or not."""
+        """Report whether the app's dependencies are reachable (readiness).
+
+        Checks the database with ``SELECT PostGIS_Version()``. Returns 503 when a
+        dependency is unavailable, so the platform can stop sending traffic here.
+        \f
+        Args:
+            request: The incoming request (gives access to the app's database).
+            response: Used to set the 503 status code when a check fails.
+
+        Returns:
+            ``"ready"`` with every check ``"ok"``, or ``"unavailable"`` (HTTP 503).
+        """  # noqa: D301 (\f hides the rest from /docs)
         checks: dict[str, Literal["ok", "unavailable"]] = {}
         try:
             with request.app.state.db.engine.connect() as conn:
