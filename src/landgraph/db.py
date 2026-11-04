@@ -28,9 +28,6 @@ class Database:
     for a free pooled connection, 5 s to open a new one, and an optional server-side
     statement timeout. The API sets that timeout; the pipeline doesn't, because its
     batch upserts and table creation may legitimately take longer.
-
-    Attributes:
-        engine: The SQLAlchemy engine. Lazy: no connection is made until first use.
     """
 
     def __init__(self, url: str, statement_timeout_ms: int | None = None) -> None:
