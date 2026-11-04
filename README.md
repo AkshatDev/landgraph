@@ -5,6 +5,7 @@ A data pipeline that loads public UK land data into **PostgreSQL/PostGIS**, and 
 Scoped to one local authority, the **Borough of Swindon** (ONS `E06000030`, planning.data entity `8600027`), so the whole flow can be built, measured and explained end to end.
 
 **Live API:** https://landgraph.fastapicloud.dev/docs
+**Code reference (Sphinx):** https://akshatdev.github.io/landgraph/
 
 ```bash
 curl "https://landgraph.fastapicloud.dev/v1/site-snapshot?lat=51.552766&lng=-1.788171"
@@ -98,6 +99,8 @@ Versioned under `/v1`: additive changes stay in v1 (adding `constraints` was one
 ## Running it
 
 Requires Docker with Compose and [uv](https://docs.astral.sh/uv/). See [`commands.md`](commands.md) for the full cheat sheet.
+
+Docs: `uv run sphinx-build -b html -W docs docs/_build/html` builds the reference locally; CI publishes it to GitHub Pages on every push to `main`.
 
 ```bash
 cp .env.example .env                       # set POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
