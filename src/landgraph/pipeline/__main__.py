@@ -17,12 +17,13 @@ from asgi_correlation_id import correlation_id
 from landgraph import Database
 from landgraph.log_config import configure_logging
 
-from .load import load_title_boundaries_resumable
+from .load import load_constraints_resumable, load_title_boundaries_resumable
 from .resources import CheckResources
-from .transform import TITLE_BOUNDARY_COLUMNS
+from .transform import CONSTRAINT_COLUMNS, TITLE_BOUNDARY_COLUMNS
 from .website_client import WebClient
 
 BASE_URL = "https://www.planning.data.gov.uk"
+CONSTRAINT_DATASETS = ["conservation-area"]  # layers stored in the constraints table
 FILES_URL = "https://files.planning.data.gov.uk"
 logger = logging.getLogger(__name__)
 
@@ -58,19 +59,31 @@ def main() -> None:
         logger.info("pipeline finished", extra={"path": str(path)})
 
     elif args.command == "load":
-        if args.dataset != "title-boundary":
+        if args.dataset == "title-boundary":
+            columns = TITLE_BOUNDARY_COLUMNS
+        elif args.dataset in CONSTRAINT_DATASETS:
+            columns = CONSTRAINT_COLUMNS
+        else:
             raise ValueError(
-                f"load supports only title-boundary for now, got {args.dataset}"
+                f"load supports title-boundary and {CONSTRAINT_DATASETS}, "
+                f"got {args.dataset}"
             )
+
         resources = CheckResources()
         resources.check_memory()
         resources.apply_thread_limits()
-        batch_rows = resources.batch_rows_for(args.path, TITLE_BOUNDARY_COLUMNS)
+        batch_rows = resources.batch_rows_for(args.path, columns)
         db = Database(os.environ["DATABASE_URL"])
         db.create_tables()
-        rows = load_title_boundaries_resumable(
-            db, args.path, read_batch_rows=batch_rows
-        )
+
+        if args.dataset == "title-boundary":
+            rows = load_title_boundaries_resumable(
+                db, args.path, read_batch_rows=batch_rows
+            )
+        else:
+            rows = load_constraints_resumable(
+                db, args.path, args.dataset, read_batch_rows=batch_rows
+            )
         logger.info("pipeline finished", extra={"rows": rows})
 
 
